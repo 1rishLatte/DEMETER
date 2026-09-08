@@ -1,0 +1,11 @@
+# DEMETER - secrets & build
+.env
+secrets.h
+arduino_secrets.h
+*.hex
+*.elf
+build/
+.cache/
+.vscode/
+.idea/
+*.log
