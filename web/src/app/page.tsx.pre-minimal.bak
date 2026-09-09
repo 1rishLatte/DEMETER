@@ -1,0 +1,437 @@
+"use client";
+import { useEffect, useRef, useState, useMemo } from "react";
+import { motion, useScroll, useTransform } from "framer-motion";
+import gsap from "gsap";
+import { ScrollTrigger } from "gsap/ScrollTrigger";
+import Lenis from "lenis";
+import { LineChart, Line, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts";
+
+gsap.registerPlugin(ScrollTrigger);
+
+type Telem = {
+  t: number; h: number; gas: number; gasAlert: number;
+  tilt: number; ax: number; ay: number; az: number;
+  rover2: { soil: number; soilPct: number; dist: number; plant: number; ir: string; pwm: number; state: string; ts: number };
+};
+
+function useMockTelem(active: boolean) {
+  const [tele, setTele] = useState<Telem>({
+    t: 28, h: 62, gas: 420, gasAlert: 0, tilt: 1.2, ax: 0.02, ay: 0.1, az: 0.98,
+    rover2: { soil: 680, soilPct: 78, dist: 120, plant: 1, ir: "010", pwm: 255, state: "RUNNING", ts: 0 }
+  });
+  const [history, setHistory] = useState<{ i:number; gas:number; soil:number; pwm:number }[]>(() =>
+    Array.from({length: 32}, (_,i)=>({i, gas: 380 + Math.random()*60, soil: 600+Math.random()*80, pwm: 180+Math.random()*40}))
+  );
+  useEffect(()=>{
+    if(!active) return;
+    let phase: "A"|"B" = "A";
+    let tick=0;
+    const id = setInterval(()=>{
+      tick++;
+      if(tick%18===0) phase = phase==="A"?"B":"A";
+      const isA = phase==="A";
+      const soil = isA ? 680 + (Math.random()*40-20) : 310 + (Math.random()*30-15);
+      const dist = isA ? 118 + Math.random()*12 : 9999;
+      const plant = isA ? 1 : 0;
+      const pwm = soil < 350 || dist > 400 ? 0 : soil > 650 && plant ? 255 : Math.round(((soil-350)/300)*140)+40;
+      const gas = 410 + Math.sin(tick/6)*40 + Math.random()*20;
+      const t = 27 + Math.sin(tick/20)*1.5 + Math.random();
+      const tilt = Math.sin(tick/15)*2.2;
+      setTele({
+        t: +t.toFixed(1), h: isA? 48+Math.random()*4 : 72+Math.random()*5,
+        gas: Math.round(gas), gasAlert: gas>600?1:0,
+        tilt: +tilt.toFixed(1), ax: +(Math.random()*0.04-0.02).toFixed(2), ay: +(tilt/40).toFixed(2), az: 0.98,
+        rover2: { soil: Math.round(soil), soilPct: Math.round(Math.max(0,Math.min(100,((soil-350)/300)*100))), dist: Math.round(dist), plant, ir: isA?"010":"000", pwm, state: pwm>0?"RUNNING":"IDLE", ts: Date.now() }
+      });
+      setHistory(h=> [...h.slice(-31), { i: h.length, gas: Math.round(gas), soil: Math.round(soil), pwm }]);
+    }, 900);
+    return ()=>clearInterval(id);
+  },[active]);
+  return { tele, history };
+}
+
+const BG_IMAGES = [
+  // hero — golden wheat sunset farmland
+  "https://images.unsplash.com/photo-1500382017468-9049fed747ef?q=80&w=1920&auto=format&fit=crop",
+  // deconstruct — tractor farmland aerial
+  "https://images.unsplash.com/photo-1500595046743-cd271d694d30?q=80&w=1920&auto=format&fit=crop",
+  // telemetry — precision ag green farmland drone
+  "https://images.unsplash.com/photo-1464226184884-fa280b87c399?q=80&w=1920&auto=format&fit=crop",
+  // specs — lush green farmland texture
+  "https://images.unsplash.com/photo-1500930540495-e92875696a16?q=80&w=1920&auto=format&fit=crop",
+];
+
+export default function Page(){
+  const { tele, history } = useMockTelem(true);
+  const heroRef = useRef<HTMLDivElement>(null);
+  const [deploy, setDeploy] = useState(true);
+  const [activeBg, setActiveBg] = useState(0);
+
+  // Lenis + GSAP — fully scrollable, no pin-lock + animated BG (IG reel style)
+  useEffect(()=>{
+    const lenis = new Lenis({ duration: 1.05, easing: (t)=> Math.min(1,1.001 - Math.pow(2,-10*t)), smoothWheel: true });
+    function raf(t: number){ lenis.raf(t); requestAnimationFrame(raf); }
+    requestAnimationFrame(raf);
+    lenis.on("scroll", ScrollTrigger.update);
+    gsap.ticker.add((t)=> lenis.raf(t*1000));
+    gsap.ticker.lagSmoothing(0);
+
+    const ctx = gsap.context(()=>{
+      // hero in
+      gsap.fromTo(".hero-title span", { y: 36, opacity:0 }, { y:0, opacity:1, duration:0.85, stagger:0.06, ease:"power3.out", delay:0.12 });
+      gsap.fromTo(".hero-meta", { y: 12, opacity:0 }, { y:0, opacity:1, duration:0.6, ease:"power2.out", delay:0.45 });
+
+      // gentle parallax on rover visual — scroll scrub WITHOUT pin
+      gsap.utils.toArray<HTMLElement>(".parallax").forEach((el)=>{
+        gsap.fromTo(el, { y: 0 }, { y: -18, ease:"none", scrollTrigger:{ trigger: el, start:"top bottom", end:"bottom top", scrub: 1 } });
+      });
+
+      // reveal on scroll for all content blocks
+      gsap.utils.toArray<HTMLElement>(".reveal").forEach((el)=>{
+        gsap.fromTo(el, { y: 22, opacity:0 }, { y:0, opacity:1, duration:0.65, ease:"power2.out",
+          scrollTrigger:{ trigger: el, start:"top 88%", toggleActions:"play none none reverse" }
+        });
+      });
+      gsap.utils.toArray<HTMLElement>(".step-card").forEach((el, i)=>{
+        gsap.fromTo(el, { y: 18, opacity:0 }, { y:0, opacity:1, duration:0.6, ease:"power2.out", delay: i*0.04,
+          scrollTrigger:{ trigger: el, start:"top 90%", toggleActions:"play none none reverse" }
+        });
+      });
+
+      // ---- BG image scrub like IG reel: each section drives bg crossfade + Ken Burns scale ----
+      gsap.set(".bg-layer", { opacity: 0, scale: 1.08 });
+      gsap.set(".bg-layer-0", { opacity: 1, scale: 1 });
+      const sections = ["#hero","#deconstruct","#telemetry","#specs"];
+      sections.forEach((sel, idx)=>{
+        ScrollTrigger.create({
+          trigger: sel,
+          start: "top 55%",
+          end: "bottom 45%",
+          onEnter: () => setActiveBg(idx),
+          onEnterBack: () => setActiveBg(idx),
+        });
+      });
+      // subtle continuous Ken Burns on active bg (hardware-accelerated scale)
+      gsap.to(".bg-layer", { scale: 1.02, duration: 8, ease: "none", repeat: -1, yoyo: true, stagger: 0 });
+    });
+    return ()=>{ lenis.destroy(); ctx.revert(); gsap.ticker.remove((t)=> lenis.raf(t*1000)); };
+  },[]);
+
+  const { scrollYProgress } = useScroll();
+  const heroOpacity = useTransform(scrollYProgress, [0,0.22], [1,0]);
+  const heroY = useTransform(scrollYProgress, [0,0.22], [0,-40]);
+
+  const specCards = useMemo(()=>[
+    { k:"01", title:"Scout Rover — Pico WH", desc:"DHT11 GP16 · MQ-135 GP26 · MPU-6050 I2C GP4/5. Hosts AP DEMETER-AP 192.168.4.1, dashboard & /status, forwards /deploy.", chips:["MicroPython","AP: 192.168.4.1","10Hz sense"] },
+    { k:"02", title:"Doser Rover — Uno + ESP32", desc:"VL53L0X A4/A5 · Soil A0 · IR D4/D8/D9 · Vibrator D5 PWM · L298P D3/D11/D13/D12. UART D2/D6 115200.", chips:["Hybrid UART","L298P","PWM 0-255"] },
+    { k:"03", title:"Precision Logic", desc:"soil<350 or no-plant → PWM 0 · dry+plant → 255 · else lerp 40→180. Zone A heavy, Zone B silent in 100ms.", chips:["Plant-gated","Hysteresis","100ms stop"] },
+    { k:"04", title:"Swarm Link", desc:"Phone on DEMETER-AP → Pico GET 192.168.4.2/deploy → ESP32 → Uno RUNNING. Logs POST /log every 500ms.", chips:["STA 192.168.4.2","/deploy /stop","CSV/JSON"] },
+  ],[]);
+
+  return (
+    <div className="min-h-screen text-[#F5F1E0] selection:bg-[#688763] selection:text-[#F5F1E0] overflow-x-hidden bg-transparent">
+      {/* Animated scroll-synced background — IG reel style (fixed behind, visible through semi-transparent sections) */}
+      <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none" aria-hidden>
+        {BG_IMAGES.map((src, i)=>(
+          <div
+            key={src}
+            className={`bg-layer bg-layer-${i} absolute inset-0 will-change-transform`}
+            style={{
+              opacity: activeBg===i ? 1 : 0,
+              transform: activeBg===i ? "scale(1) translateZ(0)" : "scale(1.08) translateZ(0)",
+              transition: "opacity 900ms cubic-bezier(0.22,1,0.36,1), transform 1200ms cubic-bezier(0.22,1,0.36,1)",
+            }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} alt="" className="h-full w-full object-cover" loading={i===0?"eager":"lazy"} decoding="async" />
+            {/* lighter veil so farmland breathes — opacity decreased */}
+            <div className="absolute inset-0 bg-[#0A3A23]/12" />
+            <div className="absolute inset-0 bg-gradient-to-b from-[#0A3A23]/5 via-[#0A3A23]/8 to-[#0A3A23]/35" />
+            <div className="absolute inset-0 opacity-[0.04] mix-blend-soft-light" style={{ background: i%2===0 ? "#688763" : "#0A3A23" }} />
+          </div>
+        ))}
+        {/* sage/deep duotone tint per section */}
+        <div
+          className="absolute inset-0 pointer-events-none transition-colors duration-700"
+          style={{ background: activeBg===1 || activeBg===3 ? "rgba(104,135,99,0.06)" : "rgba(10,58,35,0.04)" }}
+        />
+      </div>
+      {/* NAV — lighter veil */}
+      <nav className="fixed top-0 inset-x-0 z-50 border-b border-[#688763]/15 bg-[#0A3A23]/55 backdrop-blur-xl">
+        <div className="mx-auto max-w-[1280px] px-5 sm:px-8 h-[64px] flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="size-8 rounded-lg bg-[#688763] grid place-items-center text-[#F5F1E0] font-black text-[11px] tracking-widest">DE</div>
+            <span className="font-[--font-space] font-semibold tracking-[0.18em] text-[13px] text-[#F5F1E0]">D.E.M.E.T.E.R</span>
+            <span className="hidden sm:inline text-[10px] tracking-widest text-[#F5F1E0]/50 ml-2">DYNAMIC ENVIRONMENTAL MAPPING</span>
+          </div>
+          <div className="hidden md:flex items-center gap-6 text-[11px] tracking-[0.16em] text-[#F5F1E0]/60">
+            <a href="#deconstruct" className="hover:text-[#F5F1E0] transition">DECONSTRUCT</a>
+            <a href="#telemetry" className="hover:text-[#F5F1E0] transition">TELEMETRY</a>
+            <a href="#specs" className="hover:text-[#F5F1E0] transition">SPECS</a>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:flex items-center gap-2 text-[11px] tracking-widest">
+              <span className={`size-2 rounded-full ${deploy?"bg-[#688763] shadow-[0_0_14px_#688763]":"bg-[#F5F1E0]/20"} animate-pulse`} />
+              <span className="text-[#F5F1E0]/70">{deploy?"SWARM LINKED":"IDLE"}</span>
+            </span>
+            <button onClick={()=>setDeploy(v=>!v)} className={`h-9 px-5 rounded-full text-xs font-semibold tracking-wide transition ${deploy?"bg-[#F5F1E0] text-[#0A3A23] hover:bg-white":"bg-[#688763] text-[#F5F1E0] hover:bg-[#7a9a7a]"}`}>
+              {deploy?"STOP SWARM":"DEPLOY ROVER 2"}
+            </button>
+          </div>
+        </div>
+      </nav>
+
+      {/* HERO — farmland BG, lighter theme */}
+      <motion.section id="hero" ref={heroRef} style={{ opacity: heroOpacity, y: heroY }} className="relative z-10 pt-[108px] pb-10 overflow-hidden bg-[#0A3A23]/35 backdrop-blur-[0.5px]">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(900px_500px_at_70%_10%,rgba(104,135,99,0.22),transparent_70%),radial-gradient(700px_400px_at_10%_60%,rgba(245,241,224,0.06),transparent_60%)]" />
+        <div className="pointer-events-none absolute inset-0 grain opacity-[0.06]" />
+        <div className="mx-auto max-w-[1280px] px-5 sm:px-8 grid lg:grid-cols-[1.05fr_0.95fr] gap-8 items-center">
+          <div>
+            <div className="hero-meta inline-flex items-center gap-2 rounded-full border border-[#688763]/30 bg-[#688763]/15 px-3 py-1.5 text-[11px] tracking-[0.18em] text-[#F5F1E0]/80">
+              <span className="size-1.5 rounded-full bg-[#688763]" /> IOT + ROBOTICS · 2-ROVER SWARM · PICO WH + UNO/ESP32
+            </div>
+            <h1 className="hero-title mt-6 font-[--font-space] font-[700] leading-[0.88] tracking-[-0.04em] text-[42px] sm:text-[64px] lg:text-[72px] text-[#F5F1E0]">
+              <span className="block">PRECISION</span>
+              <span className="block text-[#F5F1E0]/55">GROWN.</span>
+              <span className="block text-[#688763]">NOT SPRAYED.</span>
+            </h1>
+            <p className="hero-meta mt-5 max-w-[560px] text-[15px] leading-7 text-[#F5F1E0]/65">
+              Rover 1 scouts and maps temperature, humidity, gas and micro-topography. Rover 2 follows the line and micro-doses fertilizer per plant — from <span className="text-[#F5F1E0]">Pico WH</span> to <span className="text-[#F5F1E0]">Uno + ESP32</span> in 100ms.
+            </p>
+            <div className="hero-meta mt-7 flex flex-wrap gap-3">
+              <a href="#deconstruct" className="h-11 px-6 rounded-full bg-[#688763] text-[#F5F1E0] font-semibold text-sm grid place-items-center hover:bg-[#7a9a7a] transition">Explore the swarm — ↓</a>
+              <a href="#telemetry" className="h-11 px-6 rounded-full border border-[#688763]/30 bg-[#F5F1E0]/5 font-medium text-sm grid place-items-center hover:bg-[#F5F1E0]/10 transition text-[#F5F1E0]">Watch live telemetry</a>
+            </div>
+            <div className="hero-meta mt-10 grid grid-cols-3 gap-3 max-w-[520px]">
+              {[
+                { v:"±0.5°C", k:"DHT11 · GP16", sub:"temp/hum" },
+                { v:"≤200mm", k:"VL53L0X · A4/A5", sub:"plant detect" },
+                { v:"0-255 PWM", k:"Vibrator · D5", sub:"dose control" },
+              ].map(s=>(
+                <div key={s.k} className="rounded-2xl border border-[#688763]/20 bg-[#688763]/10 p-4">
+                  <div className="font-[--font-jet] text-sm font-semibold text-[#F5F1E0]">{s.v}</div>
+                  <div className="text-[11px] tracking-widest text-[#F5F1E0]/60">{s.k}</div>
+                  <div className="text-[11px] text-[#F5F1E0]/40">{s.sub}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* hero visual — parallax, not pinned */}
+          <div className="parallax relative lg:h-[560px] h-[420px] rounded-[28px] border border-[#688763]/20 bg-gradient-to-b from-[#688763]/15 to-[#0A3A23]/60 p-4 sm:p-6 overflow-hidden will-change-transform" style={{ transform:"translateZ(0)" }}>
+            <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(245,241,224,0.04)_1px,transparent_1px),linear-gradient(to_bottom,rgba(245,241,224,0.04)_1px,transparent_1px)] bg-[size:28px_28px] opacity-20" />
+            <div className="absolute top-4 left-4 flex items-center gap-2 text-[11px] tracking-[0.16em] text-[#F5F1E0]/60"><span className="size-2 rounded-full bg-[#688763] animate-pulse" /> DEMETER-AP · 192.168.4.1</div>
+            <div className="absolute top-4 right-4 text-[10px] tracking-widest text-[#F5F1E0]/40 border border-[#688763]/20 rounded-full px-3 py-1">PICO WH + ESP32 BRIDGE</div>
+            <div className="relative h-full grid place-items-center">
+              <div className="w-full max-w-[420px] space-y-4 will-change-transform" style={{ transform: "translateZ(0)" }}>
+                <div className="rounded-2xl bg-[#F5F1E0] border border-[#688763]/20 p-4 flex gap-4 items-center shadow-[0_8px_30px_rgba(10,58,35,0.25)]">
+                  <div className="size-14 rounded-xl bg-[#688763] grid place-items-center text-[#F5F1E0] font-black">R1</div>
+                  <div>
+                    <div className="font-semibold text-sm text-[#0A3A23]">SCOUT — Pico WH</div>
+                    <div className="text-xs text-[#0A3A23]/60">DHT11 · MQ-135 · MPU-6050 · AP host</div>
+                    <div className="mt-2 flex gap-2 text-[11px] font-mono"><span className="px-2 py-1 rounded bg-[#688763] text-[#F5F1E0]">{tele.t}°C</span><span className="px-2 py-1 rounded bg-[#0A3A23]/10 text-[#0A3A23]">{tele.h.toFixed(3)}%</span><span className={`px-2 py-1 rounded ${tele.gasAlert?"bg-red-600 text-white":"bg-[#0A3A23]/10 text-[#0A3A23]"}`}>{tele.gas} gas</span></div>
+                  </div>
+                </div>
+                <div className="h-6 flex justify-center"><div className="w-px h-full bg-[#688763]/30" /><div className="absolute text-[10px] tracking-widest bg-[#EDE9D9] px-2 -mt-1 text-[#0A3A23]/50 rounded-full border border-[#688763]/20">UART 115200 · WiFi 192.168.4.2</div></div>
+                <div className={`rounded-2xl border p-4 flex gap-4 items-center transition ${tele.rover2.pwm>0?"bg-[#688763] text-[#F5F1E0] border-[#688763] shadow-[0_8px_24px_rgba(104,135,99,0.4)]":"bg-[#F5F1E0] border-[#688763]/15 text-[#0A3A23]"}`}>
+                  <div className={`size-14 rounded-xl grid place-items-center font-black ${tele.rover2.pwm>0?"bg-[#0A3A23] text-[#F5F1E0]":"bg-[#688763]/15 text-[#0A3A23]"}`}>R2</div>
+                  <div>
+                    <div className="font-semibold text-sm">DOSER — Uno + ESP32</div>
+                    <div className={`text-xs ${tele.rover2.pwm>0?"text-[#F5F1E0]/70":"text-[#0A3A23]/60"}`}>VL53 A4/A5 · Soil A0 · IR D4/D8/D9 · Vib D5</div>
+                    <div className="mt-2 flex gap-2 text-[11px] font-mono">
+                      <span className={`px-2 py-1 rounded ${tele.rover2.pwm>0?"bg-[#0A3A23] text-[#F5F1E0]":"bg-[#0A3A23]/10 text-[#0A3A23]"}`}>soil {tele.rover2.soil}</span>
+                      <span className={`px-2 py-1 rounded border ${tele.rover2.pwm>0?"bg-white/10 border-white/20 text-[#F5F1E0]":"bg-[#0A3A23]/5 border-[#0A3A23]/10 text-[#0A3A23]"}`}>dist {tele.rover2.dist>8000?"—":tele.rover2.dist+"mm"}</span>
+                      <span className={`px-2 py-1 rounded font-bold ${tele.rover2.pwm>0?"bg-[#F5F1E0] text-[#0A3A23]":"bg-[#688763] text-[#F5F1E0]"}`}>PWM {tele.rover2.pwm}</span>
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center justify-between text-[11px] font-mono text-[#F5F1E0]/60 px-1">
+                  <span>STATE {tele.rover2.state}</span><span className={tele.rover2.pwm>0?"text-[#688763] font-bold":""}>● LIVE 1.0s</span>
+                </div>
+              </div>
+            </div>
+            <div className="absolute bottom-4 inset-x-4 flex gap-2">
+              <div className="flex-1 h-1.5 rounded-full bg-[#0A3A23]/20 overflow-hidden border border-[#0A3A23]/10"><div className="h-full bg-[#688763] transition-all duration-700" style={{ width: `${tele.rover2.soilPct}%`}} /></div>
+              <span className="text-[11px] font-mono text-[#F5F1E0]/70">{tele.rover2.soilPct}% dry</span>
+            </div>
+          </div>
+        </div>
+      </motion.section>
+
+      {/* DECONSTRUCT — farmland, lighter sage */}
+      <section id="deconstruct" className="relative z-10 border-y border-[#F5F1E0]/10 bg-[#688763]/62 backdrop-blur-[2px]">
+        <div className="mx-auto max-w-[1280px] px-5 sm:px-8 py-12 lg:py-16 grid lg:grid-cols-[0.95fr_1.05fr] gap-8 items-start">
+          {/* left: sticky visual + header — scrolls naturally, not pinned */}
+          <div className="lg:sticky lg:top-[80px] space-y-6">
+            <div className="text-[11px] tracking-[0.22em] text-[#F5F1E0]/80">● SCROLL TO EXPLORE · FULLY SCROLLABLE · 60FPS TRANSFORMS</div>
+            <h2 className="font-[--font-space] text-[30px] sm:text-[42px] font-bold leading-none tracking-tight text-[#F5F1E0]">
+              TWO ROVERS.<br/><span className="text-[#0A3A23]">ONE FIELD.</span><br/><span className="text-[#F5F1E0]">ZERO WASTE.</span>
+            </h2>
+            <p className="text-sm leading-6 text-[#F5F1E0]/75 max-w-[420px]">Scroll controls the reveal — no pin lock, entire page flows. Each layer uses <span className="text-[#F5F1E0] font-medium">translate3d</span> for butter-smooth scrub.</p>
+
+            <div className="relative h-[380px] sm:h-[420px] rounded-[24px] border border-[#0A3A23]/15 bg-[#F5F1E0] overflow-hidden p-6 grain shadow-[0_20px_60px_rgba(10,58,35,0.18)] will-change-transform">
+              <div className="absolute inset-0 bg-[radial-gradient(600px_300px_at_50%_0%,rgba(104,135,99,0.18),transparent_70%)]" />
+              <div className="absolute inset-0 grid place-items-center">
+                <div className="relative w-[320px] h-[180px]">
+                  <div className="absolute inset-0 rounded-[18px] border border-[#0A3A23]/10 bg-gradient-to-b from-[#0A3A23]/5 to-transparent" />
+                  <div className="absolute inset-2 rounded-[14px] border border-[#688763]/20 bg-white" />
+                  <div className="absolute left-1/2 -translate-x-1/2 bottom-6 flex gap-3">
+                    <span className="size-7 rounded-full bg-[#688763]/20 border border-[#688763]/30" /><span className="size-7 rounded-full bg-[#688763]/20 border border-[#688763]/30" />
+                  </div>
+                  <div className="absolute top-6 left-6 right-6 h-10 rounded-full border border-[#688763]/20 bg-[#688763]/10 grid place-items-center text-[10px] tracking-[0.2em] text-[#0A3A23] font-semibold">CHASSIS · L298P D3/D11 D13/D12</div>
+                </div>
+              </div>
+              <div className="absolute top-6 inset-x-6 flex gap-2 justify-center">
+                <div className="rounded-xl bg-[#688763] text-[#F5F1E0] px-3 py-2 text-xs font-bold shadow">DHT11<span className="block text-[10px] font-normal opacity-80">GP16 · {tele.t}°C {tele.h}%</span></div>
+                <div className="rounded-xl bg-[#0A3A23] text-[#F5F1E0] px-3 py-2 text-xs font-bold">MQ-135<span className="block text-[10px] font-normal opacity-70">GP26 · {tele.gas}</span></div>
+                <div className="rounded-xl bg-white border border-[#688763]/20 text-[#0A3A23] px-3 py-2 text-xs font-bold">MPU-6050<span className="block text-[10px] font-normal text-[#0A3A23]/60">GP4/5 · {tele.tilt}°</span></div>
+              </div>
+              <div className="absolute bottom-6 inset-x-6 flex gap-2 justify-center">
+                <div className="rounded-xl bg-[#0A3A23] text-[#F5F1E0] border border-[#0A3A23] px-3 py-2 text-xs">VL53L0X<span className="block font-mono text-[#F5F1E0]/80 text-[11px]">{tele.rover2.dist>8000?"—":tele.rover2.dist+"mm"} · IR {tele.rover2.ir}</span></div>
+                <div className="rounded-xl bg-[#688763] text-[#F5F1E0] px-3 py-2 text-xs font-bold">Soil A0<span className="block text-[11px] opacity-90">{tele.rover2.soil} · {tele.rover2.soilPct}%</span></div>
+                <div className="rounded-xl bg-[#F5F1E0] border border-[#0A3A23]/10 text-[#0A3A23] px-3 py-2 text-xs font-bold">Vibrator D5<span className="block text-[11px] font-mono">PWM {tele.rover2.pwm}</span></div>
+              </div>
+              <div className="absolute bottom-3 inset-x-3 flex justify-between text-[9px] tracking-widest font-mono text-[#0A3A23]/50">
+                <span className="rounded-full border border-[#688763]/15 bg-white px-2.5 py-1">PICO WH · MicroPython</span>
+                <span className="rounded-full border border-[#688763]/15 bg-white px-2.5 py-1">ESP32 16/17 · UNO D2/D6</span>
+              </div>
+            </div>
+          </div>
+
+          {/* right: alternating steps — fully scrollable */}
+          <div className="space-y-5 sm:space-y-6">
+            {[
+              { n:"01", title:"Scout & Map", body:"Rover 1 crawls the field hosting DEMETER-AP. DHT11 reads canopy temp/humidity, MQ-135 sniffs gas, MPU-6050 maps micro-topography — streamed to /status at 10Hz.", pin:"GP16/GP26/GP4-5", align:"left" },
+              { n:"02", title:"Detect — Plant or Pass", body:"Rover 2's VL53L0X (A4/A5) ranges <200mm = plant. Soil cap A0: wet 250-350, dry 650-850. IR D4/D8/D9 holds the line. No plant → dose 0 in 100ms.", pin:"A4/A5 · A0 · D4/8/9", align:"right" },
+              { n:"03", title:"Decide — Per-Plant PWM", body:"Wet or no-plant → 0. Dry + plant → 255 blast. In-between → 40→180 lerp. Demo: Zone A (dry 680, 120mm) heavy, Zone B (wet 300, —) silent.", pin:"D5 PWM · 1k/2k divider", align:"left" },
+              { n:"04", title:"Dose — Vibrator Precision", body:"D5 MOSFET drives vibrator, 1N4007-protected, 1000µF on 3.3V. Dashboard chart: gas vs soil/pwm inverse — the jury wow.", pin:"D3/D11 · 1000µF", align:"right" },
+            ].map((s)=>(
+              <div key={s.n} className={`step-card relative rounded-[20px] border border-[#0A3A23]/10 bg-[#F5F1E0] p-6 sm:p-7 shadow-[0_8px_30px_rgba(10,58,35,0.12)] will-change-transform ${s.align==="right"?"lg:ml-8":"lg:mr-8"}`} style={{ transform:"translateZ(0)"}}>
+                <div className="flex items-center gap-3 text-[#688763] font-mono text-xs tracking-widest"><span className="size-7 rounded-full bg-[#0A3A23] text-[#F5F1E0] grid place-items-center font-bold text-xs">{s.n}</span> STEP {s.n}</div>
+                <h3 className="mt-3 font-[--font-space] text-[20px] font-semibold tracking-tight text-[#0A3A23]">{s.title}</h3>
+                <p className="mt-3 text-sm leading-6 text-[#0A3A23]/65">{s.body}</p>
+                <div className="mt-4 text-[11px] font-mono text-[#0A3A23]/40">PINS · {s.pin}</div>
+              </div>
+            ))}
+            <div className="step-card rounded-[16px] border border-[#0A3A23]/15 bg-[#0A3A23] p-4 text-[#F5F1E0] text-xs leading-5 will-change-transform">
+              Entire section is <span className="font-semibold">standard smooth scroll</span> — no pin, no lock. Alternating cards slide in on scroll, sticky visual tracks with `translate3d`. Mobile scales gracefully.
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* TELEMETRY — deep with animated BG, lighter */}
+      <section id="telemetry" className="relative z-10 border-t border-[#688763]/12 bg-[#0A3A23]/45 backdrop-blur-[2px]">
+        <div className="mx-auto max-w-[1280px] px-5 sm:px-8 py-10 sm:py-14">
+          <div className="flex flex-wrap gap-4 items-end justify-between reveal">
+            <div>
+              <div className="text-[11px] tracking-[0.2em] text-[#688763]">● LIVE TELEMETRY · MOCK NOW · PICO LATER</div>
+              <h2 className="font-[--font-space] text-[28px] sm:text-[36px] font-bold tracking-tight text-[#F5F1E0]">Field data, not guesswork.</h2>
+              <p className="text-sm text-[#F5F1E0]/60 max-w-[560px]">Toggle <span className="text-[#F5F1E0]">NEXT_PUBLIC_DATA_SOURCE=pico</span> to fetch <span className="font-mono text-[#F5F1E0]">http://192.168.4.1/status</span> directly. History is local 60-point ring.</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={()=>setDeploy(true)} className={`h-10 px-5 rounded-full font-semibold text-sm transition ${deploy?"bg-[#688763] text-[#F5F1E0]":"bg-[#F5F1E0]/10 text-[#F5F1E0] border border-[#F5F1E0]/15"}`}>RUNNING</button>
+              <button onClick={()=>setDeploy(false)} className={`h-10 px-5 rounded-full font-semibold text-sm transition ${!deploy?"bg-[#F5F1E0] text-[#0A3A23]":"bg-[#F5F1E0]/10 text-[#F5F1E0] border border-[#F5F1E0]/15"}`}>IDLE</button>
+            </div>
+          </div>
+
+          <div className="mt-8 grid grid-cols-2 lg:grid-cols-6 gap-3">
+            {[
+              { label:"Temp", value:`${tele.t}`, unit:"°C", sub:"DHT11 GP16", ok:true },
+              { label:"Humidity", value:`${tele.h.toFixed(3)}`, unit:"%", sub:"DHT11", ok:true },
+              { label:"Gas", value:`${tele.gas}`, unit:tele.gasAlert?"🔴 alert":"🟢 ok", sub:"MQ-135 GP26", ok:!tele.gasAlert },
+              { label:"Tilt", value:`${tele.tilt}`, unit:"deg", sub:"MPU GP4/5", ok:true },
+              { label:"Soil", value:`${tele.rover2.soil}`, unit:`${tele.rover2.soilPct}% dry`, sub:`A0 cap · IR ${tele.rover2.ir}`, ok:tele.rover2.soil>350 },
+              { label:"PWM", value:`${deploy?tele.rover2.pwm:0}`, unit:"/255 vib D5", sub:tele.rover2.state, ok: deploy && tele.rover2.pwm>0 },
+            ].map(c=>(
+              <div key={c.label} className="reveal rounded-2xl border border-[#688763]/20 bg-[#688763]/10 p-4 will-change-transform" style={{ transform:"translateZ(0)"}}>
+                <div className="text-[10px] tracking-[0.16em] text-[#F5F1E0]/55">{c.label}</div>
+                <div className="mt-1 font-[--font-space] text-[26px] font-bold leading-none text-[#F5F1E0]">{c.value}<span className="text-xs font-normal text-[#F5F1E0]/50 ml-1">{c.unit}</span></div>
+                <div className={`mt-2 text-[11px] font-mono ${c.ok?"text-[#688763]":"text-[#F5F1E0]/40"}`}>{c.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-6 grid lg:grid-cols-[1.4fr_0.6fr] gap-4">
+            <div className="reveal rounded-2xl border border-[#688763]/20 bg-[#F5F1E0] p-4 sm:p-6 will-change-transform" style={{ transform:"translateZ(0)"}}>
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-semibold text-[#0A3A23]">Gas (scout) vs Soil/PWM (doser) — inverse</div>
+                <span className="text-[11px] font-mono text-[#0A3A23]/50">60 pts · 1s poll</span>
+              </div>
+              <div className="mt-4 h-[220px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={history}>
+                    <XAxis dataKey="i" hide />
+                    <YAxis yAxisId="l" domain={[0,1023]} hide />
+                    <YAxis yAxisId="r" orientation="right" domain={[0,255]} hide />
+                    <Tooltip contentStyle={{ background:"#F5F1E0", border:"1px solid rgba(10,58,35,0.12)", borderRadius:12, fontSize:12, color:"#0A3A23" }} />
+                    <Line yAxisId="l" type="monotone" dataKey="gas" stroke="#0A3A23" strokeWidth={2} dot={false} />
+                    <Line yAxisId="l" type="monotone" dataKey="soil" stroke="#688763" strokeWidth={2} dot={false} />
+                    <Line yAxisId="r" type="monotone" dataKey="pwm" stroke="#B07828" strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="mt-2 flex gap-3 text-[11px] font-mono text-[#0A3A23]/60"><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#0A3A23]" />Gas</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#688763]" />Soil</span><span className="flex items-center gap-1"><span className="size-2 rounded-full bg-[#B07828]" />PWM</span></div>
+            </div>
+            <div className="reveal rounded-2xl border border-[#688763]/20 bg-[#688763]/10 p-5 will-change-transform" style={{ transform:"translateZ(0)"}}>
+              <div className="text-sm font-semibold text-[#F5F1E0]">Zone replay</div>
+              <div className="mt-4 space-y-3">
+                <div className={`rounded-xl border p-3 flex justify-between items-center ${tele.rover2.soil>650 && tele.rover2.dist<200?"border-[#688763]/50 bg-[#688763]/20":"border-[#F5F1E0]/15 opacity-60"}`}>
+                  <div><div className="text-xs font-bold text-[#F5F1E0]">Zone A — dry paper + stick 120mm</div><div className="text-[11px] font-mono text-[#F5F1E0]/60">soil 680 · dist 120 · pwm 255</div></div><span className="text-xs font-bold text-[#688763]">HEAVY</span>
+                </div>
+                <div className={`rounded-xl border p-3 flex justify-between items-center ${tele.rover2.soil<350 && tele.rover2.plant===0?"border-[#F5F1E0]/20 bg-[#F5F1E0]/5":"border-[#F5F1E0]/10 opacity-60"}`}>
+                  <div><div className="text-xs font-bold text-[#F5F1E0]">Zone B — wet sponge, no stick</div><div className="text-[11px] font-mono text-[#F5F1E0]/60">soil 300 · dist — · pwm 0</div></div><span className="text-xs text-[#F5F1E0]/70">SILENT</span>
+                </div>
+                <div className="rounded-xl bg-[#688763] text-[#F5F1E0] p-3 text-xs leading-5">
+                  Dashboard proof: Soil/PWM inverse to Gas. Stop in 100ms on wet/no-plant — jury wow.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* SPECS — sage with animated BG */}
+      <section id="specs" className="relative z-10 border-t border-[#F5F1E0]/10 bg-[#688763]/85 backdrop-blur-[2px] py-12 sm:py-16">
+        <div className="mx-auto max-w-[1280px] px-5 sm:px-8">
+          <div className="flex flex-wrap justify-between gap-4 items-end">
+            <h2 className="reveal font-[--font-space] text-[30px] sm:text-[40px] font-bold tracking-tight leading-none text-[#F5F1E0]">Every pin,<br/><span className="text-[#0A3A23]">every decision.</span></h2>
+            <p className="reveal max-w-[420px] text-sm text-[#F5F1E0]/75">Built with Pico WH, Uno R3 + ESP32, Thonny & Arduino IDE 2.x — no hardcoded secrets, open AP for demo.</p>
+          </div>
+          <div className="mt-8 grid md:grid-cols-2 gap-4">
+            {specCards.map(c=>(
+              <div key={c.k} className="reveal rounded-[20px] border border-[#0A3A23]/10 bg-[#F5F1E0] p-6 will-change-transform shadow-[0_8px_30px_rgba(10,58,35,0.12)]" style={{ transform:"translateZ(0)"}}>
+                <div className="text-[11px] tracking-[0.18em] text-[#688763] font-semibold">0{c.k} —</div>
+                <div className="mt-2 font-semibold text-[#0A3A23]">{c.title}</div>
+                <p className="mt-2 text-sm leading-6 text-[#0A3A23]/65">{c.desc}</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  {c.chips.map(ch=> <span key={ch} className="rounded-full border border-[#0A3A23]/10 bg-[#688763]/10 px-3 py-1 text-[11px] font-mono text-[#0A3A23]/70">{ch}</span>)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="reveal mt-6 rounded-[20px] border border-[#0A3A23]/15 bg-[#F5F1E0] p-6 sm:p-8 text-[#0A3A23] will-change-transform shadow-[0_12px_40px_rgba(10,58,35,0.15)]">
+            <div className="flex flex-wrap gap-6 items-center justify-between">
+              <div>
+                <div className="text-[11px] tracking-[0.22em] font-semibold text-[#688763]">READY FOR FIELD TRIAL?</div>
+                <div className="font-[--font-space] text-[24px] sm:text-[30px] font-bold tracking-tight leading-none mt-1">Deploy the swarm. Watch precision.</div>
+                <div className="text-sm opacity-60 mt-1">Phone → WiFi DEMETER-AP → http://192.168.4.1/ → Deploy. Bench: Uno Serial g/s.</div>
+              </div>
+              <div className="flex gap-3">
+                <a href="#telemetry" className="h-11 px-7 rounded-full bg-[#0A3A23] text-[#F5F1E0] font-semibold grid place-items-center hover:bg-[#14402F] transition">Open telemetry</a>
+                <a href="https://github.com" target="_blank" className="h-11 px-7 rounded-full border border-[#0A3A23]/15 font-semibold grid place-items-center text-[#0A3A23] hover:bg-[#688763]/10 transition">Docs →</a>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-8 flex flex-wrap gap-3 text-[11px] font-mono text-[#F5F1E0]/60">
+            <span>© 2026 D.E.M.E.T.E.R — AGRI-SWARM</span><span>·</span><span>Forty Love · The Courts palette: #688763 · #0A3A23</span>
+          </div>
+        </div>
+      </section>
+
+      <style>{`html{scrollbar-gutter:stable; overflow-y: auto} body{overflow-y: auto} #deconstruct, #telemetry, #specs{ overflow: visible }`}</style>
+    </div>
+  );
+}

@@ -1,0 +1,30 @@
+@import url('https://fonts.cdnfonts.com/css/brittany-signature');
+@import "tailwindcss";
+
+:root{
+  --onyx: #191919;
+  --eggshell: #EADDC8;
+  --chartreuse: #00674F;
+  --olive: #7A6A2E;
+  --moss: #3D4A2E;
+  --line: #2a2618;
+}
+
+* { scrollbar-width: thin; scrollbar-color: var(--chartreuse) transparent; }
+html{ scroll-behavior:auto; overflow-x:hidden; background: var(--onyx); }
+html.lenis,html.lenis body{ height:auto; }
+.lenis.lenis-smooth{ scroll-behavior:auto !important; }
+body{
+  background: var(--onyx);
+  color: var(--eggshell);
+  font-family: var(--font-geist-sans), system-ui, -apple-system, sans-serif;
+  overflow-x:hidden;
+  -webkit-font-smoothing: antialiased;
+}
+::selection{ background: var(--chartreuse); color: var(--onyx); }
+.font-brittany{ font-family:'Brittany Signature', cursive; }
+.grain::after{
+  content:""; position:absolute; inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.92' numOctaves='4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  pointer-events:none; opacity:.35;
+}

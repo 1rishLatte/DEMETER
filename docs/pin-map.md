@@ -6,6 +6,7 @@
 |--------|----------|--------|---------|
 | DHT11 data | GP16 | 10k pullup to 3.3V, VCC 3.3V | — |
 | MQ-135 AO | GP26 ADC0 | VCC 5V (heater 150mA), **AO -> 1k top / 2k bottom -> GP26** 5V->3.3V | **1k/2k mandatory, test ≤3.3V** |
+| Soil Hygrometer (resistive probe) | GP27 ADC1 | **3.3V → probe → GP27 node → 10k → GND** (voltage divider). Probe top, 10k pulldown. Wet=low R → high V. Dry=high R → low V. | **10k pulldown mandatory** |
 | MPU-6050 SDA/SCL | GP4 / GP5 | I2C0 400kHz, VIN 3.3V | — |
 | HC-SR04 TRIG | GP14 | 3.3V -> TRIG (VIH 2V OK) | — |
 | HC-SR04 ECHO | GP15 | **ECHO -> 1k/2k -> GP15** 5V->3.3V | **1k/2k mandatory** |
